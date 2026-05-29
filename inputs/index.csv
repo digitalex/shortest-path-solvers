@@ -1,3 +1,5 @@
 test_file,expected_output
 test1.gr,6
 test2.gr,4
+USA-road-d.BAY.gr,1853714
+USA-road-d.NY.gr,495306
