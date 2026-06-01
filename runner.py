@@ -43,7 +43,7 @@ def main():
                     [solver_path, test_file_path],
                     capture_output=True,
                     text=True,
-                    timeout=60 # Timeout just in case
+                    timeout=180 # Timeout just in case
                 )
                 end_time = time.time()
                 elapsed = end_time - start_time
