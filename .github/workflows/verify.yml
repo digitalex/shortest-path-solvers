@@ -1,0 +1,52 @@
+name: Verification Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  verify:
+    name: Run Benchmark Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Provision Road Network Datasets
+        run: |
+          chmod +x ./download_data.sh
+          ./download_data.sh
+
+      - name: Execute All Solvers
+        run: |
+          chmod +x ./runner.py
+          failed=0
+          for solver_dir in solvers/*; do
+            if [ -d "$solver_dir" ]; then
+              solver=$(basename "$solver_dir")
+              echo "=========================================================="
+              echo "Running benchmark for solver: $solver"
+              echo "=========================================================="
+              if ! ./runner.py "$solver"; then
+                echo "Solver $solver failed."
+                failed=1
+              else
+                echo "Solver $solver passed."
+              fi
+              echo ""
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "One or more solvers produced incorrect results or crashed."
+            exit 1
+          fi
+          echo "All solvers successfully executed and verified."
