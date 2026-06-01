@@ -19,3 +19,14 @@ cd solvers/ch
 cargo build --release
 ```
 The standalone executable will be available at `solvers/ch/target/release/ch`.
+
+## Benchmarks
+
+The benchmark suite includes small test graphs and a few large graphs from the USA-road-d dataset. You can run all of these by using the `runner.py` script. The results are summarized below:
+
+| Solver | test1.gr | test2.gr | USA-road-d.BAY.gr | USA-road-d.NY.gr |
+|--------|----------|----------|-------------------|------------------|
+| `ch` | 0.01s | 0.01s | 0.58s | 0.43s |
+| `indexed_heap` | 0.02s | 0.02s | 3.24s | 1.55s |
+| `dijkstra` | 0.03s | 0.03s | 3.49s | 2.73s |
+| `bellman_ford` | 0.04s | 0.02s | Timeout (>60s) | Timeout (>60s) |
