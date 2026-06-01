@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+import sys
+
+class IndexedMinHeap:
+    def __init__(self, max_nodes):
+        self.heap = [] # stores (distance, node)
+        self.pos = [-1] * (max_nodes + 1)
+        self.size = 0
+
+    def push(self, dist, node):
+        self.heap.append((dist, node))
+        self.pos[node] = self.size
+        self._sift_up(self.size)
+        self.size += 1
+
+    def pop(self):
+        if self.size == 0:
+            return None
+        min_dist, min_node = self.heap[0]
+        self.pos[min_node] = -1
+        
+        last_dist, last_node = self.heap.pop()
+        self.size -= 1
+        
+        if self.size > 0:
+            self.heap[0] = (last_dist, last_node)
+            self.pos[last_node] = 0
+            self._sift_down(0)
+            
+        return min_dist, min_node
+
+    def decrease_key(self, dist, node):
+        idx = self.pos[node]
+        if idx == -1:
+            self.push(dist, node)
+        elif dist < self.heap[idx][0]:
+            self.heap[idx] = (dist, node)
+            self._sift_up(idx)
+            
+    def _sift_up(self, idx):
+        while idx > 0:
+            parent = (idx - 1) >> 1
+            if self.heap[idx][0] < self.heap[parent][0]:
+                self._swap(idx, parent)
+                idx = parent
+            else:
+                break
+                
+    def _sift_down(self, idx):
+        while True:
+            left = (idx << 1) + 1
+            right = left + 1
+            smallest = idx
+            
+            if left < self.size and self.heap[left][0] < self.heap[smallest][0]:
+                smallest = left
+            if right < self.size and self.heap[right][0] < self.heap[smallest][0]:
+                smallest = right
+                
+            if smallest != idx:
+                self._swap(idx, smallest)
+                idx = smallest
+            else:
+                break
+                
+    def _swap(self, i, j):
+        self.heap[i], self.heap[j] = self.heap[j], self.heap[i]
+        self.pos[self.heap[i][1]] = i
+        self.pos[self.heap[j][1]] = j
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: solve <input_file>")
+        sys.exit(1)
+
+    filename = sys.argv[1]
+
+    num_nodes = 0
+    num_edges = 0
+    
+    # First pass to find number of nodes and edges
+    with open(filename, 'r') as f:
+        for line in f:
+            if line.startswith('p'):
+                parts = line.split()
+                if len(parts) >= 4:
+                    num_nodes = int(parts[2])
+                    num_edges = int(parts[3])
+                break
+
+    if num_nodes == 0:
+        print("Error: number of nodes not found")
+        sys.exit(1)
+
+    # If num_edges was not found or 0, we can fall back to counting a lines,
+    # but well-formed DIMACS has it. We'll pre-allocate for num_edges.
+    if num_edges == 0:
+        # Fallback to lists if edge count is missing (rare in proper DIMACS)
+        # But we'll try to count them first
+        with open(filename, 'r') as f:
+            for line in f:
+                if line.startswith('a'):
+                    num_edges += 1
+
+    head = [-1] * (num_nodes + 1)
+    to = [0] * num_edges
+    weight = [0] * num_edges
+    nxt = [0] * num_edges
+    
+    edge_cnt = 0
+    with open(filename, 'r') as f:
+        for line in f:
+            if not line or line[0] == 'c' or line[0] == 'p':
+                continue
+            if line[0] == 'a':
+                # a u v w
+                parts = line.split()
+                if len(parts) >= 4:
+                    u = int(parts[1])
+                    v = int(parts[2])
+                    w = int(parts[3])
+                    if edge_cnt >= len(to):
+                        to.append(v)
+                        weight.append(w)
+                        nxt.append(head[u])
+                    else:
+                        to[edge_cnt] = v
+                        weight[edge_cnt] = w
+                        nxt[edge_cnt] = head[u]
+                    head[u] = edge_cnt
+                    edge_cnt += 1
+
+    dist = [float('inf')] * (num_nodes + 1)
+    dist[1] = 0
+    
+    pq = IndexedMinHeap(num_nodes)
+    pq.push(0, 1)
+    
+    while pq.size > 0:
+        d, u = pq.pop()
+        
+        if u == num_nodes:
+            print(d)
+            return
+            
+        e = head[u]
+        while e != -1:
+            v = to[e]
+            w = weight[e]
+            if dist[u] + w < dist[v]:
+                dist[v] = dist[u] + w
+                pq.decrease_key(dist[v], v)
+            e = nxt[e]
+            
+    print("Unreachable")
+
+if __name__ == '__main__':
+    main()
