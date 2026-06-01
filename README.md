@@ -29,4 +29,4 @@ The benchmark suite includes small test graphs and a few large graphs from the U
 | `ch` | 0.01s | 0.01s | 0.58s | 0.43s |
 | `indexed_heap` | 0.02s | 0.02s | 3.24s | 1.55s |
 | `dijkstra` | 0.03s | 0.03s | 3.49s | 2.73s |
-| `bellman_ford` | 0.04s | 0.02s | Timeout (>60s) | Timeout (>60s) |
+| `bellman_ford` | 0.04s | 0.02s | 134.68s | 109.15s |
