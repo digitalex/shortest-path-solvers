@@ -36,9 +36,13 @@ def main():
     dist[1] = 0
 
     for _ in range(num_nodes - 1):
+        updated = False
         for u, v, w in edges:
             if dist[u] + w < dist[v]:
                 dist[v] = dist[u] + w
+                updated = True
+        if not updated:
+            break
 
     # Assuming no negative cycles
     ans = dist[num_nodes]
