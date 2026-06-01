@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import sys
-import collections
+import array
 import heapq
 
 def main():
@@ -11,47 +11,75 @@ def main():
     filename = sys.argv[1]
 
     num_nodes = 0
-    adj = collections.defaultdict(list)
-
     with open(filename, 'r') as f:
         for line in f:
-            line = line.strip()
-            if not line or line.startswith('c'):
-                continue
-            parts = line.split()
-            if not parts:
-                continue
-            if parts[0] == 'p':
+            if line.startswith('p '):
+                parts = line.split()
                 num_nodes = int(parts[2])
-            elif parts[0] == 'a':
-                u, v, w = int(parts[1]), int(parts[2]), int(parts[3])
-                adj[u].append((v, w))
+                break
 
     if num_nodes == 0:
         print("Error: number of nodes not found")
         sys.exit(1)
 
+    # Pass 2: Count degrees
+    head = array.array('I', [0] * (num_nodes + 2))
+    with open(filename, 'r') as f:
+        for line in f:
+            if line.startswith('a '):
+                parts = line.split()
+                u = int(parts[1])
+                head[u] += 1
+
+    actual_edges = 0
+    for i in range(1, num_nodes + 2):
+        count = head[i]
+        head[i] = actual_edges
+        actual_edges += count
+
+    # Pass 3: Populate edges
+    edge_target = array.array('I', [0] * actual_edges)
+    edge_weight = array.array('I', [0] * actual_edges)
+    
+    current_head = array.array('I', head)
+    with open(filename, 'r') as f:
+        for line in f:
+            if line.startswith('a '):
+                parts = line.split()
+                u = int(parts[1])
+                idx = current_head[u]
+                edge_target[idx] = int(parts[2])
+                edge_weight[idx] = int(parts[3])
+                current_head[u] += 1
+
+    # Dijkstra
+    INF = 0xFFFFFFFFFFFFFFFF
+    dist = array.array('Q', [INF] * (num_nodes + 1))
+    dist[1] = 0
+
     pq = [(0, 1)]
-    dist = {1: 0}
-    visited = set()
 
     while pq:
         d, u = heapq.heappop(pq)
 
-        if u in visited:
+        if d > dist[u]:
             continue
-        visited.add(u)
 
         if u == num_nodes:
             print(d)
             return
 
-        for v, w in adj[u]:
-            if v not in visited:
-                new_d = d + w
-                if new_d < dist.get(v, float('inf')):
-                    dist[v] = new_d
-                    heapq.heappush(pq, (new_d, v))
+        start_idx = head[u]
+        end_idx = head[u + 1]
+
+        for i in range(start_idx, end_idx):
+            v = edge_target[i]
+            w = edge_weight[i]
+            new_d = d + w
+
+            if new_d < dist[v]:
+                dist[v] = new_d
+                heapq.heappush(pq, (new_d, v))
 
     print("Unreachable")
 
