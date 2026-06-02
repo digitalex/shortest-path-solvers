@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 import sys
+import os
 import collections
 import heapq
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import dimacs
 
 def main():
     if len(sys.argv) < 2:
@@ -10,26 +14,15 @@ def main():
 
     filename = sys.argv[1]
 
-    num_nodes = 0
-    adj = collections.defaultdict(list)
-
-    with open(filename, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('c'):
-                continue
-            parts = line.split()
-            if not parts:
-                continue
-            if parts[0] == 'p':
-                num_nodes = int(parts[2])
-            elif parts[0] == 'a':
-                u, v, w = int(parts[1]), int(parts[2]), int(parts[3])
-                adj[u].append((v, w))
-
-    if num_nodes == 0:
-        print("Error: number of nodes not found")
+    try:
+        num_nodes, edges = dimacs.load_dimacs(filename)
+    except ValueError as e:
+        print(f"Error: {e}")
         sys.exit(1)
+
+    adj = collections.defaultdict(list)
+    for u, v, w in edges.tolist():
+        adj[u].append((v, w))
 
     pq = [(0, 1)]
     dist = {1: 0}
