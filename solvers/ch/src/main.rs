@@ -3,6 +3,12 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::collections::BinaryHeap;
 use std::cmp::{Ordering, Reverse};
+use rayon::prelude::*;
+use std::cell::RefCell;
+
+thread_local! {
+    static TLS_CTX: RefCell<Option<SearchContext>> = RefCell::new(None);
+}
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 struct State {
@@ -281,8 +287,16 @@ fn query(
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: solve <input_file>");
+        eprintln!("Usage: solve <input_file> [num_threads]");
         std::process::exit(1);
+    }
+
+    if args.len() > 2 {
+        if let Ok(threads) = args[2].parse::<usize>() {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build_global();
+        }
     }
 
     let filename = &args[1];
@@ -331,79 +345,155 @@ fn main() {
         backward,
     };
 
+    let mut contracted = vec![false; (num_nodes + 1) as usize];
+    let limits = WitnessLimits { max_settled: 5 }; // Very low to be fast
+
+    let initial_importances: Vec<_> = (1..=num_nodes).into_par_iter().map(|v| {
+        let mut exact_ed = 0;
+        TLS_CTX.with(|ctx_cell| {
+            let mut opt_ctx = ctx_cell.borrow_mut();
+            if opt_ctx.is_none() {
+                *opt_ctx = Some(SearchContext::new(num_nodes as usize));
+            }
+            let ctx = opt_ctx.as_mut().unwrap();
+            let (ed, _) = exact_edge_difference(v, &graph, &contracted, &limits, ctx);
+            exact_ed = ed;
+        });
+        (exact_ed, v)
+    }).collect();
+
     let mut pq = BinaryHeap::new();
-    for v in 1..=num_nodes {
-        let in_deg = graph.backward[v as usize].len() as i32;
-        let out_deg = graph.forward[v as usize].len() as i32;
-        let ed = (in_deg * out_deg) - in_deg - out_deg;
+    for (ed, v) in initial_importances {
         pq.push(Reverse((ed, v, 0))); // importance, node, eval_count
     }
 
-    let mut contracted = vec![false; (num_nodes + 1) as usize];
     let mut node_order = vec![0; (num_nodes + 1) as usize];
     let mut order = 0;
 
     let mut deleted_neighbors = vec![0; (num_nodes + 1) as usize];
-    let mut ctx = SearchContext::new(num_nodes as usize);
-    let limits = WitnessLimits { max_settled: 5 }; // Very low to be fast
+    // ctx is no longer needed in the main loop since we'll use TLS_CTX
+
 
     let mut _num_contracted = 0;
-    while let Some(Reverse((_imp, v, eval_count))) = pq.pop() {
-        if contracted[v as usize] {
-            continue;
-        }
+    
+    let batch_size = 256;
+    let mut in_batch = vec![false; (num_nodes + 1) as usize];
+    
+    loop {
+        let mut batch = Vec::new();
+        let mut deferred = Vec::new();
 
-        let un_in = graph.backward[v as usize].iter().filter(|e| !contracted[e.target as usize]).count();
-        let un_out = graph.forward[v as usize].iter().filter(|e| !contracted[e.target as usize]).count();
-
-        // STRICT core condition: stop if the best node has degree > 5
-        if un_in > 5 || un_out > 5 {
-            break;
-        }
-
-        if !pq.is_empty() {
-            let Reverse((next_imp, _, _)) = pq.peek().unwrap();
+        while let Some(Reverse((imp, v, eval_count))) = pq.pop() {
+            if contracted[v as usize] { continue; }
             
+            let un_in = graph.backward[v as usize].iter().filter(|e| !contracted[e.target as usize]).count();
+            let un_out = graph.forward[v as usize].iter().filter(|e| !contracted[e.target as usize]).count();
+
+            // STRICT core condition: stop if the best node has degree > 5
+            if un_in > 5 || un_out > 5 {
+                deferred.push(Reverse((imp, v, eval_count)));
+                break;
+            }
+
             if eval_count == 0 {
                 let approx_ed = (un_in * un_out) as i32 - un_in as i32 - un_out as i32;
                 let approx_imp = approx_ed + deleted_neighbors[v as usize];
                 
-                if approx_imp > *next_imp {
-                    pq.push(Reverse((approx_imp, v, 1)));
+                let next_imp = pq.peek().map_or(u32::MAX as i32, |Reverse((i, _, _))| *i);
+                
+                if approx_imp > next_imp {
+                    deferred.push(Reverse((approx_imp, v, 1)));
                     continue;
                 }
             }
+
+            // Check independence
+            let mut is_independent = true;
+            for e in &graph.forward[v as usize] {
+                if in_batch[e.target as usize] {
+                    is_independent = false;
+                    break;
+                }
+            }
+            if is_independent {
+                for e in &graph.backward[v as usize] {
+                    if in_batch[e.target as usize] {
+                        is_independent = false;
+                        break;
+                    }
+                }
+            }
+
+            if is_independent {
+                batch.push((v, eval_count, imp));
+                in_batch[v as usize] = true;
+                if batch.len() >= batch_size {
+                    break;
+                }
+            } else {
+                deferred.push(Reverse((imp, v, eval_count)));
+            }
         }
 
-        let (exact_ed, shortcuts) = exact_edge_difference(v, &graph, &contracted, &limits, &mut ctx);
-        let exact_imp = exact_ed + deleted_neighbors[v as usize];
+        // Put deferred back
+        for item in deferred {
+            pq.push(item);
+        }
 
-        if !pq.is_empty() {
-            let Reverse((next_imp, _, _)) = pq.peek().unwrap();
-            if exact_imp > *next_imp && eval_count < 2 {
+        if batch.is_empty() {
+            break;
+        }
+
+        // Parallel evaluate
+        let mut evaluated: Vec<_> = batch.into_par_iter().map(|(v, eval_count, _old_imp)| {
+            let mut exact_ed = 0;
+            let mut shortcuts = Vec::new();
+            TLS_CTX.with(|ctx_cell| {
+                let mut opt_ctx = ctx_cell.borrow_mut();
+                if opt_ctx.is_none() {
+                    *opt_ctx = Some(SearchContext::new(num_nodes as usize));
+                }
+                let ctx = opt_ctx.as_mut().unwrap();
+                let res = exact_edge_difference(v, &graph, &contracted, &limits, ctx);
+                exact_ed = res.0;
+                shortcuts = res.1;
+            });
+            let exact_imp = exact_ed + deleted_neighbors[v as usize];
+            (v, eval_count, exact_imp, shortcuts)
+        }).collect();
+
+        // Sort by exact_imp to contract the best ones first
+        evaluated.sort_by_key(|&(_, _, exact_imp, ref _shortcuts)| exact_imp);
+
+        for (v, eval_count, exact_imp, shortcuts) in evaluated {
+            // Unmark in_batch
+            in_batch[v as usize] = false;
+
+            let next_imp = pq.peek().map_or(u32::MAX as i32, |Reverse((i, _, _))| *i);
+            
+            if exact_imp > next_imp && eval_count < 2 {
                 pq.push(Reverse((exact_imp, v, 2)));
-                continue;
-            }
-        }
+            } else {
+                contracted[v as usize] = true;
+                node_order[v as usize] = order;
+                order += 1;
+                _num_contracted += 1;
 
-        contracted[v as usize] = true;
-        node_order[v as usize] = order;
-        order += 1;
-        _num_contracted += 1;
+                for (u, w, weight) in shortcuts {
+                    add_edge(&mut graph.forward, u, w, weight);
+                    add_edge(&mut graph.backward, w, u, weight);
+                }
 
-        for (u, w, weight) in shortcuts {
-            add_edge(&mut graph.forward, u, w, weight);
-            add_edge(&mut graph.backward, w, u, weight);
-        }
-
-        for e in &graph.forward[v as usize] {
-            if !contracted[e.target as usize] {
-                deleted_neighbors[e.target as usize] += 1;
-            }
-        }
-        for e in &graph.backward[v as usize] {
-            if !contracted[e.target as usize] {
-                deleted_neighbors[e.target as usize] += 1;
+                for e in &graph.forward[v as usize] {
+                    if !contracted[e.target as usize] {
+                        deleted_neighbors[e.target as usize] += 1;
+                    }
+                }
+                for e in &graph.backward[v as usize] {
+                    if !contracted[e.target as usize] {
+                        deleted_neighbors[e.target as usize] += 1;
+                    }
+                }
             }
         }
     }
