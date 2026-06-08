@@ -19,3 +19,14 @@ cd solvers/ch
 cargo build --release
 ```
 The standalone executable will be available at `solvers/ch/target/release/ch`.
+
+### Bellman-Ford Solver (Optimized using SPFA)
+A Shortest Path Faster Algorithm (SPFA) implementation optimized from Bellman-Ford is also available.
+
+Benchmark comparison for `USA-road-d.BAY.gr` (Bay Area):
+* Before: >60s (Timed out)
+* After: ~32.05s
+
+Benchmark comparison for `USA-road-d.NY.gr` (New York):
+* Before: ~54.89s
+* After: ~40.96s (25.3% improvement)
