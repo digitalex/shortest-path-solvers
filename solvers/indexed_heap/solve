@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+import os
 
 class IndexedMinHeap:
     def __init__(self, max_nodes):
@@ -75,60 +76,30 @@ def main():
 
     filename = sys.argv[1]
 
-    num_nodes = 0
-    num_edges = 0
-    
-    # First pass to find number of nodes and edges
-    with open(filename, 'r') as f:
-        for line in f:
-            if line.startswith('p'):
-                parts = line.split()
-                if len(parts) >= 4:
-                    num_nodes = int(parts[2])
-                    num_edges = int(parts[3])
-                break
+    # Use centralized dimacs loader which has binary caching
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import dimacs
 
-    if num_nodes == 0:
-        print("Error: number of nodes not found")
+    try:
+        num_nodes, edges = dimacs.load_dimacs(filename)
+    except ValueError as e:
+        print(f"Error: {e}")
         sys.exit(1)
 
-    # If num_edges was not found or 0, we can fall back to counting a lines,
-    # but well-formed DIMACS has it. We'll pre-allocate for num_edges.
-    if num_edges == 0:
-        # Fallback to lists if edge count is missing (rare in proper DIMACS)
-        # But we'll try to count them first
-        with open(filename, 'r') as f:
-            for line in f:
-                if line.startswith('a'):
-                    num_edges += 1
+    num_edges = edges.shape[0]
 
     head = [-1] * (num_nodes + 1)
     to = [0] * num_edges
     weight = [0] * num_edges
     nxt = [0] * num_edges
     
-    edge_cnt = 0
-    with open(filename, 'r') as f:
-        for line in f:
-            if not line or line[0] == 'c' or line[0] == 'p':
-                continue
-            if line[0] == 'a':
-                # a u v w
-                parts = line.split()
-                if len(parts) >= 4:
-                    u = int(parts[1])
-                    v = int(parts[2])
-                    w = int(parts[3])
-                    if edge_cnt >= len(to):
-                        to.append(v)
-                        weight.append(w)
-                        nxt.append(head[u])
-                    else:
-                        to[edge_cnt] = v
-                        weight[edge_cnt] = w
-                        nxt[edge_cnt] = head[u]
-                    head[u] = edge_cnt
-                    edge_cnt += 1
+    for i, (u, v, w) in enumerate(edges.tolist()):
+        u = int(u)
+        v = int(v)
+        to[i] = v
+        weight[i] = w
+        nxt[i] = head[u]
+        head[u] = i
 
     dist = [float('inf')] * (num_nodes + 1)
     dist[1] = 0
