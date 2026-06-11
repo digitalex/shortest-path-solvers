@@ -19,12 +19,12 @@ class IndexedMinHeap:
         min_dist, min_node = self.heap[0]
         self.pos[min_node] = -1
         
-        last_dist, last_node = self.heap.pop()
+        last_item = self.heap.pop()
         self.size -= 1
         
         if self.size > 0:
-            self.heap[0] = (last_dist, last_node)
-            self.pos[last_node] = 0
+            self.heap[0] = last_item
+            self.pos[last_item[1]] = 0
             self._sift_down(0)
             
         return min_dist, min_node
@@ -38,35 +38,64 @@ class IndexedMinHeap:
             self._sift_up(idx)
             
     def _sift_up(self, idx):
+        item = self.heap[idx]
+        dist, node = item
         while idx > 0:
-            parent = (idx - 1) >> 1
-            if self.heap[idx][0] < self.heap[parent][0]:
-                self._swap(idx, parent)
+            parent = (idx - 1) >> 2
+            p_item = self.heap[parent]
+            if dist < p_item[0]:
+                self.heap[idx] = p_item
+                self.pos[p_item[1]] = idx
                 idx = parent
             else:
                 break
+        self.heap[idx] = item
+        self.pos[node] = idx
                 
     def _sift_down(self, idx):
+        size = self.size
+        item = self.heap[idx]
+        dist, node = item
+        
         while True:
-            left = (idx << 1) + 1
-            right = left + 1
-            smallest = idx
+            child1 = (idx << 2) + 1
+            if child1 >= size:
+                break
             
-            if left < self.size and self.heap[left][0] < self.heap[smallest][0]:
-                smallest = left
-            if right < self.size and self.heap[right][0] < self.heap[smallest][0]:
-                smallest = right
-                
-            if smallest != idx:
-                self._swap(idx, smallest)
-                idx = smallest
+            smallest_child = child1
+            min_dist = self.heap[child1][0]
+            
+            child2 = child1 + 1
+            if child2 < size:
+                d2 = self.heap[child2][0]
+                if d2 < min_dist:
+                    min_dist = d2
+                    smallest_child = child2
+                    
+                child3 = child1 + 2
+                if child3 < size:
+                    d3 = self.heap[child3][0]
+                    if d3 < min_dist:
+                        min_dist = d3
+                        smallest_child = child3
+                        
+                    child4 = child1 + 3
+                    if child4 < size:
+                        d4 = self.heap[child4][0]
+                        if d4 < min_dist:
+                            min_dist = d4
+                            smallest_child = child4
+            
+            if min_dist < dist:
+                c_item = self.heap[smallest_child]
+                self.heap[idx] = c_item
+                self.pos[c_item[1]] = idx
+                idx = smallest_child
             else:
                 break
                 
-    def _swap(self, i, j):
-        self.heap[i], self.heap[j] = self.heap[j], self.heap[i]
-        self.pos[self.heap[i][1]] = i
-        self.pos[self.heap[j][1]] = j
+        self.heap[idx] = item
+        self.pos[node] = idx
 
 def main():
     if len(sys.argv) < 2:
