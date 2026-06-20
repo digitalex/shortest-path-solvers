@@ -36,6 +36,7 @@ struct Graph {
 struct SearchContext {
     dist: Vec<u32>,
     gen: Vec<u32>,
+    visited: Vec<u32>,
     current_gen: u32,
     pq: BinaryHeap<State>,
 }
@@ -45,6 +46,7 @@ impl SearchContext {
         Self {
             dist: vec![u32::MAX; num_nodes + 1],
             gen: vec![0; num_nodes + 1],
+            visited: vec![0; num_nodes + 1],
             current_gen: 0,
             pq: BinaryHeap::new(),
         }
@@ -54,6 +56,7 @@ impl SearchContext {
         self.current_gen += 1;
         if self.current_gen == 0 {
             self.gen.fill(0);
+            self.visited.fill(0);
             self.current_gen = 1;
         }
         self.pq.clear();
@@ -70,6 +73,14 @@ impl SearchContext {
         } else {
             u32::MAX
         }
+    }
+
+    fn set_visited(&mut self, node: u32) {
+        self.visited[node as usize] = self.current_gen;
+    }
+
+    fn is_visited(&self, node: u32) -> bool {
+        self.visited[node as usize] == self.current_gen
     }
 }
 
@@ -177,50 +188,46 @@ fn query(
     graph: &Graph,
     node_order: &[u32],
     contracted: &[bool],
-    num_nodes: u32,
+    ctx_f: &mut SearchContext,
+    ctx_b: &mut SearchContext,
 ) -> Option<u32> {
     if s == t {
         return Some(0);
     }
 
-    let mut dist_f = vec![u32::MAX; (num_nodes + 1) as usize];
-    let mut dist_b = vec![u32::MAX; (num_nodes + 1) as usize];
-
-    let mut pq_f = BinaryHeap::new();
-    let mut pq_b = BinaryHeap::new();
+    ctx_f.reset();
+    ctx_b.reset();
 
     let mut best_dist = u32::MAX;
 
-    dist_f[s as usize] = 0;
-    pq_f.push(State { cost: 0, position: s });
+    ctx_f.set_dist(s, 0);
+    ctx_f.pq.push(State { cost: 0, position: s });
 
-    dist_b[t as usize] = 0;
-    pq_b.push(State { cost: 0, position: t });
+    ctx_b.set_dist(t, 0);
+    ctx_b.pq.push(State { cost: 0, position: t });
 
-    let mut visited_f = vec![false; (num_nodes + 1) as usize];
-    let mut visited_b = vec![false; (num_nodes + 1) as usize];
-
-    while !pq_f.is_empty() || !pq_b.is_empty() {
-        let min_f = pq_f.peek().map(|s| s.cost).unwrap_or(u32::MAX);
-        let min_b = pq_b.peek().map(|s| s.cost).unwrap_or(u32::MAX);
+    while !ctx_f.pq.is_empty() || !ctx_b.pq.is_empty() {
+        let min_f = ctx_f.pq.peek().map(|s| s.cost).unwrap_or(u32::MAX);
+        let min_b = ctx_b.pq.peek().map(|s| s.cost).unwrap_or(u32::MAX);
 
         if min_f >= best_dist && min_b >= best_dist {
             break;
         }
 
         if min_f <= min_b {
-            let State { cost, position } = pq_f.pop().unwrap();
-            if visited_f[position as usize] {
+            let State { cost, position } = ctx_f.pq.pop().unwrap();
+            if ctx_f.is_visited(position) {
                 continue;
             }
-            visited_f[position as usize] = true;
+            ctx_f.set_visited(position);
 
             if cost > best_dist {
                 continue;
             }
 
-            if dist_b[position as usize] != u32::MAX {
-                best_dist = best_dist.min(cost + dist_b[position as usize]);
+            let dist_b = ctx_b.get_dist(position);
+            if dist_b != u32::MAX {
+                best_dist = best_dist.min(cost + dist_b);
             }
 
             for e in &graph.forward[position as usize] {
@@ -232,25 +239,26 @@ fn query(
                 };
                 if valid {
                     let next_cost = cost + e.weight;
-                    if next_cost < dist_f[w as usize] {
-                        dist_f[w as usize] = next_cost;
-                        pq_f.push(State { cost: next_cost, position: w });
+                    if next_cost < ctx_f.get_dist(w) {
+                        ctx_f.set_dist(w, next_cost);
+                        ctx_f.pq.push(State { cost: next_cost, position: w });
                     }
                 }
             }
         } else {
-            let State { cost, position } = pq_b.pop().unwrap();
-            if visited_b[position as usize] {
+            let State { cost, position } = ctx_b.pq.pop().unwrap();
+            if ctx_b.is_visited(position) {
                 continue;
             }
-            visited_b[position as usize] = true;
+            ctx_b.set_visited(position);
 
             if cost > best_dist {
                 continue;
             }
 
-            if dist_f[position as usize] != u32::MAX {
-                best_dist = best_dist.min(cost + dist_f[position as usize]);
+            let dist_f = ctx_f.get_dist(position);
+            if dist_f != u32::MAX {
+                best_dist = best_dist.min(cost + dist_f);
             }
 
             for e in &graph.backward[position as usize] {
@@ -262,9 +270,9 @@ fn query(
                 };
                 if valid {
                     let next_cost = cost + e.weight;
-                    if next_cost < dist_b[w as usize] {
-                        dist_b[w as usize] = next_cost;
-                        pq_b.push(State { cost: next_cost, position: w });
+                    if next_cost < ctx_b.get_dist(w) {
+                        ctx_b.set_dist(w, next_cost);
+                        ctx_b.pq.push(State { cost: next_cost, position: w });
                     }
                 }
             }
@@ -411,7 +419,9 @@ fn main() {
     let s = 1;
     let t = num_nodes;
 
-    if let Some(dist) = query(s, t, &graph, &node_order, &contracted, num_nodes) {
+    let mut ctx_b = SearchContext::new(num_nodes as usize);
+
+    if let Some(dist) = query(s, t, &graph, &node_order, &contracted, &mut ctx, &mut ctx_b) {
         println!("{}", dist);
     } else {
         println!("Unreachable");
