@@ -286,38 +286,105 @@ fn main() {
     }
 
     let filename = &args[1];
-    let file = File::open(filename).unwrap();
-    let reader = BufReader::new(file);
-
     let mut num_nodes = 0;
     let mut _num_edges = 0;
 
     let mut forward = Vec::new();
     let mut backward = Vec::new();
 
-    for line in reader.lines() {
-        let line = line.unwrap();
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('c') {
-            continue;
+    let bin_filename = format!("{}.bin", filename);
+    let mut loaded_from_bin = false;
+
+    if let (Ok(meta_txt), Ok(meta_bin)) = (std::fs::metadata(filename), std::fs::metadata(&bin_filename)) {
+        if let (Ok(time_txt), Ok(time_bin)) = (meta_txt.modified(), meta_bin.modified()) {
+            if time_bin >= time_txt {
+                if let Ok(mut f) = File::open(&bin_filename) {
+                    use std::io::Read;
+                    let mut magic = [0u8; 4];
+                    if f.read_exact(&mut magic).is_ok() && &magic == b"FBC1" {
+                        let mut header = [0u8; 8];
+                        if f.read_exact(&mut header).is_ok() {
+                            num_nodes = u32::from_le_bytes(header[0..4].try_into().unwrap());
+                            _num_edges = u32::from_le_bytes(header[4..8].try_into().unwrap());
+                            
+                            forward = vec![Vec::new(); (num_nodes + 1) as usize];
+                            backward = vec![Vec::new(); (num_nodes + 1) as usize];
+                            
+                            let mut u_bytes = vec![0u8; (_num_edges as usize) * 4];
+                            let mut v_bytes = vec![0u8; (_num_edges as usize) * 4];
+                            let mut w_bytes = vec![0u8; (_num_edges as usize) * 8];
+                            
+                            if f.read_exact(&mut u_bytes).is_ok() && 
+                               f.read_exact(&mut v_bytes).is_ok() && 
+                               f.read_exact(&mut w_bytes).is_ok() {
+                                
+                                for i in 0..(_num_edges as usize) {
+                                    let u = u32::from_le_bytes(u_bytes[i*4..(i+1)*4].try_into().unwrap());
+                                    let v = u32::from_le_bytes(v_bytes[i*4..(i+1)*4].try_into().unwrap());
+                                    let w_f64 = f64::from_le_bytes(w_bytes[i*8..(i+1)*8].try_into().unwrap());
+                                    let w = w_f64 as u32;
+                                    forward[u as usize].push(Edge { target: v, weight: w });
+                                    backward[v as usize].push(Edge { target: u, weight: w });
+                                }
+                                loaded_from_bin = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !loaded_from_bin {
+        let file = File::open(filename).unwrap();
+        let reader = BufReader::new(file);
+
+        let mut u_vec = Vec::new();
+        let mut v_vec = Vec::new();
+        let mut w_vec = Vec::new();
+
+        for line in reader.lines() {
+            let line = line.unwrap();
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('c') {
+                continue;
+            }
+
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.is_empty() {
+                continue;
+            }
+
+            if parts[0] == "p" {
+                num_nodes = parts[2].parse::<u32>().unwrap();
+                _num_edges = parts[3].parse::<u32>().unwrap();
+                forward = vec![Vec::new(); (num_nodes + 1) as usize];
+                backward = vec![Vec::new(); (num_nodes + 1) as usize];
+            } else if parts[0] == "a" {
+                let u: u32 = parts[1].parse().unwrap();
+                let v: u32 = parts[2].parse().unwrap();
+                let w: u32 = parts[3].parse().unwrap();
+                forward[u as usize].push(Edge { target: v, weight: w });
+                backward[v as usize].push(Edge { target: u, weight: w });
+                
+                u_vec.push(u);
+                v_vec.push(v);
+                w_vec.push(w as f64);
+            }
         }
 
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.is_empty() {
-            continue;
-        }
-
-        if parts[0] == "p" {
-            num_nodes = parts[2].parse::<u32>().unwrap();
-            _num_edges = parts[3].parse::<u32>().unwrap();
-            forward = vec![Vec::new(); (num_nodes + 1) as usize];
-            backward = vec![Vec::new(); (num_nodes + 1) as usize];
-        } else if parts[0] == "a" {
-            let u: u32 = parts[1].parse().unwrap();
-            let v: u32 = parts[2].parse().unwrap();
-            let w: u32 = parts[3].parse().unwrap();
-            forward[u as usize].push(Edge { target: v, weight: w });
-            backward[v as usize].push(Edge { target: u, weight: w });
+        if num_nodes > 0 {
+            if let Ok(f) = File::create(&bin_filename) {
+                use std::io::{Write, BufWriter};
+                let mut writer = BufWriter::new(f);
+                writer.write_all(b"FBC1").unwrap();
+                writer.write_all(&num_nodes.to_le_bytes()).unwrap();
+                writer.write_all(&_num_edges.to_le_bytes()).unwrap();
+                
+                for u in &u_vec { writer.write_all(&u.to_le_bytes()).unwrap(); }
+                for v in &v_vec { writer.write_all(&v.to_le_bytes()).unwrap(); }
+                for w in &w_vec { writer.write_all(&w.to_le_bytes()).unwrap(); }
+            }
         }
     }
 
