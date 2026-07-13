@@ -74,15 +74,17 @@ impl SearchContext {
 }
 
 fn add_edge(adj: &mut Vec<Vec<Edge>>, u: u32, v: u32, weight: u32) {
-    for edge in &mut adj[u as usize] {
-        if edge.target == v {
-            if weight < edge.weight {
-                edge.weight = weight;
+    let edges = &mut adj[u as usize];
+    match edges.binary_search_by(|e| e.target.cmp(&v)) {
+        Ok(idx) => {
+            if weight < edges[idx].weight {
+                edges[idx].weight = weight;
             }
-            return;
+        }
+        Err(idx) => {
+            edges.insert(idx, Edge { target: v, weight });
         }
     }
-    adj[u as usize].push(Edge { target: v, weight });
 }
 
 struct WitnessLimits {
@@ -326,6 +328,31 @@ fn main() {
         std::process::exit(1);
     }
 
+    for edges in &mut forward {
+        edges.sort_by_key(|e| e.target);
+        let mut i = 1;
+        while i < edges.len() {
+            if edges[i - 1].target == edges[i].target {
+                edges[i - 1].weight = edges[i - 1].weight.min(edges[i].weight);
+                edges.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+    for edges in &mut backward {
+        edges.sort_by_key(|e| e.target);
+        let mut i = 1;
+        while i < edges.len() {
+            if edges[i - 1].target == edges[i].target {
+                edges[i - 1].weight = edges[i - 1].weight.min(edges[i].weight);
+                edges.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
     let mut graph = Graph {
         forward,
         backward,
@@ -356,8 +383,8 @@ fn main() {
         let un_in = graph.backward[v as usize].iter().filter(|e| !contracted[e.target as usize]).count();
         let un_out = graph.forward[v as usize].iter().filter(|e| !contracted[e.target as usize]).count();
 
-        // STRICT core condition: stop if the best node has degree > 5
-        if un_in > 5 || un_out > 5 {
+        // STRICT core condition: stop if the best node has degree > 15
+        if un_in > 15 || un_out > 15 {
             break;
         }
 
